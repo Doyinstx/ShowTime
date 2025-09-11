@@ -1,22 +1,24 @@
 # ShowTime 🎭
 
-A decentralized entertainment booking platform built on Stacks blockchain using Clarity smart contracts with **multi-tier pricing** support.
+A decentralized entertainment booking platform built on Stacks blockchain using Clarity smart contracts with **multi-tier pricing** support and **automated refund system**.
 
 ## Overview
 
-ShowTime enables event organizers to create entertainment events with flexible pricing tiers and allows users to book tickets in a trustless, decentralized manner. The platform handles ticket sales across multiple tiers (Early Bird, Regular, VIP), capacity management, and booking confirmations through smart contracts.
+ShowTime enables event organizers to create entertainment events with flexible pricing tiers and allows users to book tickets in a trustless, decentralized manner. The platform handles ticket sales across multiple tiers (Early Bird, Regular, VIP), capacity management, booking confirmations, and automated refunds for cancelled events through smart contracts with STX escrow.
 
 ## Features
 
 - **Multi-tier Pricing**: Support for Early Bird, Regular, and VIP ticket categories with different pricing
 - **Event Creation**: Organizers can create entertainment events with custom pricing and capacity for each tier
 - **Flexible Ticket Booking**: Users can securely book tickets from available tiers with automatic capacity management
+- **Automated Refund System**: STX escrow mechanism with automatic refunds for cancelled events
 - **Early Bird Sales**: Time-limited early bird tickets with special pricing
 - **VIP Experience**: Premium ticket tier with enhanced pricing
 - **Platform Fee System**: Configurable platform fees for sustainable operations
 - **Booking Management**: Track user bookings and event attendance across all tiers
-- **Event Cancellation**: Organizers can cancel events when necessary
+- **Event Cancellation**: Organizers can cancel events with automatic refund processing
 - **Tier-specific Capacity Control**: Automatic prevention of overbooking per tier
+- **Escrow Protection**: All ticket payments held in escrow until event completion or cancellation
 - **Advanced Analytics**: Track sales performance across different ticket tiers
 
 ## Ticket Tiers
@@ -26,18 +28,41 @@ ShowTime enables event organizers to create entertainment events with flexible p
 - **Availability**: Time-limited (until early-bird-deadline)
 - **Capacity**: Limited quantity set by organizer
 - **Benefits**: Significant cost savings for early purchasers
+- **Refund**: Full refund if event cancelled
 
 ### 2. Regular Tickets
 - **Price**: Standard pricing
 - **Availability**: Throughout the sales period
 - **Capacity**: Main ticket allocation
 - **Benefits**: Standard event access
+- **Refund**: Full refund if event cancelled
 
 ### 3. VIP Tickets
 - **Price**: Premium pricing
 - **Availability**: Throughout the sales period
 - **Capacity**: Limited premium allocation
 - **Benefits**: Enhanced experience (implementation dependent)
+- **Refund**: Full refund if event cancelled
+
+## Refund System
+
+The platform features an automated STX escrow system that provides:
+
+### Escrow Protection
+- All ticket payments are held in contract escrow
+- Funds released to organizer only after successful event completion
+- Platform fees deducted only from successful events
+
+### Automatic Refunds
+- Event cancellation triggers automatic refund eligibility
+- Users can claim full refunds for cancelled events
+- No fees charged on refunded tickets
+
+### Refund Process
+1. **Event Cancellation**: Organizer cancels event using `cancel-event`
+2. **Refund Eligibility**: All attendees become eligible for full refunds
+3. **Claim Refund**: Users call `claim-refund` to receive their STX back
+4. **Automatic Processing**: Contract handles refund calculation and transfer
 
 ## Smart Contract Functions
 
@@ -45,7 +70,9 @@ ShowTime enables event organizers to create entertainment events with flexible p
 
 - `create-event`: Create a new entertainment event with multi-tier pricing
 - `book-ticket`: Book a ticket for a specific tier of an event
-- `cancel-event`: Cancel an event (organizer only)
+- `cancel-event`: Cancel an event (organizer only) - triggers refund eligibility
+- `claim-refund`: Claim refund for cancelled event (attendees only)
+- `release-event-funds`: Release escrow funds to organizer after successful event
 - `update-platform-fee`: Update platform fee (owner only)
 
 ### Read-Only Functions
@@ -59,6 +86,9 @@ ShowTime enables event organizers to create entertainment events with flexible p
 - `get-tier-price`: Get price for specific ticket tier
 - `get-total-tickets-sold`: Get total tickets sold across all tiers
 - `get-tier-sales`: Get detailed sales breakdown by tier
+- `get-escrow-balance`: Get total STX held in escrow for an event
+- `is-refund-eligible`: Check if user is eligible for refund
+- `get-refund-amount`: Get refund amount for a user's booking
 
 ## Usage
 
@@ -92,6 +122,22 @@ ShowTime enables event organizers to create entertainment events with flexible p
 (contract-call? .showtime book-ticket u1 u3 u1575000)
 ```
 
+### Refund System Usage
+
+```clarity
+;; Cancel event (organizer only)
+(contract-call? .showtime cancel-event u1)
+
+;; Claim refund after cancellation (attendees)
+(contract-call? .showtime claim-refund u1)
+
+;; Check refund eligibility
+(contract-call? .showtime is-refund-eligible u1 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)
+
+;; Release funds after successful event (organizer)
+(contract-call? .showtime release-event-funds u1)
+```
+
 ### Checking Tier Availability
 
 ```clarity
@@ -110,6 +156,9 @@ ShowTime enables event organizers to create entertainment events with flexible p
 
 ;; Get sales breakdown by tier
 (contract-call? .showtime get-tier-sales u1)
+
+;; Get escrow balance for event
+(contract-call? .showtime get-escrow-balance u1)
 ```
 
 ## Ticket Type Constants
@@ -140,6 +189,11 @@ This ensures logical pricing progression across tiers.
 - `u108`: Invalid ticket type
 - `u109`: Specific tier is full
 - `u110`: Invalid string input
+- `u111`: Refund already claimed
+- `u112`: Not eligible for refund
+- `u113`: Event not cancelled
+- `u114`: Insufficient contract balance
+- `u115`: Event already completed
 
 ## Installation
 
@@ -161,6 +215,9 @@ Test scenarios should cover:
 - Early bird deadline enforcement
 - Capacity management per tier
 - Price validation and hierarchy
+- Event cancellation and refunds
+- Escrow fund management
+- Fund release after successful events
 
 ## API Integration Examples
 
@@ -181,6 +238,19 @@ async function bookTicket(eventId: number, tierType: number, payment: number) {
   });
   return result;
 }
+
+// Example refund claim function
+async function claimRefund(eventId: number) {
+  const result = await contractCall({
+    contractAddress: CONTRACT_ADDRESS,
+    contractName: 'showtime',
+    functionName: 'claim-refund',
+    functionArgs: [
+      uintCV(eventId)
+    ],
+  });
+  return result;
+}
 ```
 
 ## Contributing
@@ -188,12 +258,12 @@ async function bookTicket(eventId: number, tierType: number, payment: number) {
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Add tests for new tier functionality
+4. Add tests for new refund functionality
 5. Submit a pull request
 
 ## Roadmap
 
-- [ ] **Refund System**: Add automated refund mechanism for cancelled events with STX escrow
+- [x] **Refund System**: Add automated refund mechanism for cancelled events with STX escrow ✅
 - [ ] **Event Rating & Reviews**: Allow attendees to rate and review events after completion
 - [ ] **Loyalty Program**: Implement reward points for frequent event attendees
 - [ ] **Group Booking Discounts**: Add functionality for bulk ticket purchases with automatic discounts
@@ -205,4 +275,4 @@ async function bookTicket(eventId: number, tierType: number, payment: number) {
 
 ---
 
-**Note**: This implementation provides a foundation for multi-tier ticketing. Event organizers should consider additional off-chain services for enhanced VIP experiences and customer support.
+**Note**: This implementation provides a foundation for multi-tier ticketing with automated refunds. The escrow system ensures both organizers and attendees are protected, with automatic refund processing for cancelled events and secure fund release for successful events.

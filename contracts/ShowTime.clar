@@ -1,5 +1,5 @@
 ;; ShowTime - Entertainment Booking Platform
-;; A decentralized platform for booking entertainment events with multi-tier pricing
+;; A decentralized platform for booking entertainment events with multi-tier pricing and automated refunds
 
 ;; Constants
 (define-constant contract-owner tx-sender)
@@ -14,6 +14,11 @@
 (define-constant err-invalid-ticket-type (err u108))
 (define-constant err-tier-full (err u109))
 (define-constant err-invalid-string (err u110))
+(define-constant err-refund-already-claimed (err u111))
+(define-constant err-not-eligible-refund (err u112))
+(define-constant err-event-not-cancelled (err u113))
+(define-constant err-insufficient-contract-balance (err u114))
+(define-constant err-event-already-completed (err u115))
 
 ;; Ticket type constants
 (define-constant ticket-type-early-bird u1)
@@ -42,8 +47,11 @@
     regular-sold: uint,
     vip-sold: uint,
     is-active: bool,
+    is-cancelled: bool,
+    is-completed: bool,
     event-date: uint,
-    early-bird-deadline: uint
+    early-bird-deadline: uint,
+    escrow-balance: uint
   }
 )
 
@@ -54,7 +62,8 @@
     ticket-type: uint,
     amount-paid: uint,
     booking-timestamp: uint,
-    is-confirmed: bool
+    is-confirmed: bool,
+    refund-claimed: bool
   }
 )
 
@@ -88,7 +97,7 @@
           (is-eq ticket-type ticket-type-vip)))
 )
 
-(define-private (get-ticket-price (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (event-date uint) (early-bird-deadline uint))) (ticket-type uint))
+(define-private (get-ticket-price (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (is-cancelled bool) (is-completed bool) (event-date uint) (early-bird-deadline uint) (escrow-balance uint))) (ticket-type uint))
   (if (is-eq ticket-type ticket-type-early-bird)
     (get early-bird-price event-data)
     (if (is-eq ticket-type ticket-type-regular)
@@ -96,7 +105,7 @@
       (get vip-price event-data)))
 )
 
-(define-private (get-tickets-sold (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (event-date uint) (early-bird-deadline uint))) (ticket-type uint))
+(define-private (get-tickets-sold (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (is-cancelled bool) (is-completed bool) (event-date uint) (early-bird-deadline uint) (escrow-balance uint))) (ticket-type uint))
   (if (is-eq ticket-type ticket-type-early-bird)
     (get early-bird-sold event-data)
     (if (is-eq ticket-type ticket-type-regular)
@@ -104,7 +113,7 @@
       (get vip-sold event-data)))
 )
 
-(define-private (get-tier-capacity (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (event-date uint) (early-bird-deadline uint))) (ticket-type uint))
+(define-private (get-tier-capacity (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (is-cancelled bool) (is-completed bool) (event-date uint) (early-bird-deadline uint) (escrow-balance uint))) (ticket-type uint))
   (if (is-eq ticket-type ticket-type-early-bird)
     (get early-bird-capacity event-data)
     (if (is-eq ticket-type ticket-type-regular)
@@ -112,7 +121,7 @@
       (get vip-capacity event-data)))
 )
 
-(define-private (is-early-bird-available (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (event-date uint) (early-bird-deadline uint))))
+(define-private (is-early-bird-available (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (is-cancelled bool) (is-completed bool) (event-date uint) (early-bird-deadline uint) (escrow-balance uint))))
   (and (< (get early-bird-sold event-data) (get early-bird-capacity event-data))
        (<= stacks-block-height (get early-bird-deadline event-data)))
 )
@@ -165,8 +174,11 @@
         regular-sold: u0,
         vip-sold: u0,
         is-active: true,
+        is-cancelled: false,
+        is-completed: false,
         event-date: event-date,
-        early-bird-deadline: early-bird-deadline
+        early-bird-deadline: early-bird-deadline,
+        escrow-balance: u0
       }
     )
     (var-set next-event-id (+ event-id u1))
@@ -174,7 +186,7 @@
   )
 )
 
-;; Book tickets for an event with specific tier
+;; Book tickets for an event with specific tier (payment held in escrow)
 (define-public (book-ticket (event-id uint) (ticket-type uint) (payment uint))
   (let (
     (event-data (unwrap! (map-get? events { event-id: event-id }) err-not-found))
@@ -189,6 +201,8 @@
     (asserts! (> payment u0) err-invalid-amount)
     (asserts! (is-valid-ticket-type ticket-type) err-invalid-ticket-type)
     (asserts! (get is-active event-data) err-event-not-active)
+    (asserts! (not (get is-cancelled event-data)) err-event-not-active)
+    (asserts! (not (get is-completed event-data)) err-event-already-completed)
     (asserts! (is-none existing-booking) err-booking-exists)
     (asserts! (< tickets-sold tier-capacity) err-tier-full)
     (asserts! (>= payment total-required) err-insufficient-payment)
@@ -199,6 +213,9 @@
       true
     )
     
+    ;; Transfer STX to contract for escrow
+    (try! (stx-transfer? payment tx-sender (as-contract tx-sender)))
+    
     ;; Create booking
     (map-set bookings
       { event-id: event-id, attendee: tx-sender }
@@ -207,24 +224,34 @@
         ticket-type: ticket-type,
         amount-paid: payment,
         booking-timestamp: stacks-block-height,
-        is-confirmed: true
+        is-confirmed: true,
+        refund-claimed: false
       }
     )
     
-    ;; Update event booking count for specific tier
+    ;; Update event booking count for specific tier and escrow balance
     (if (is-eq ticket-type ticket-type-early-bird)
       (map-set events
         { event-id: event-id }
-        (merge event-data { early-bird-sold: (+ (get early-bird-sold event-data) u1) })
+        (merge event-data { 
+          early-bird-sold: (+ (get early-bird-sold event-data) u1),
+          escrow-balance: (+ (get escrow-balance event-data) payment)
+        })
       )
       (if (is-eq ticket-type ticket-type-regular)
         (map-set events
           { event-id: event-id }
-          (merge event-data { regular-sold: (+ (get regular-sold event-data) u1) })
+          (merge event-data { 
+            regular-sold: (+ (get regular-sold event-data) u1),
+            escrow-balance: (+ (get escrow-balance event-data) payment)
+          })
         )
         (map-set events
           { event-id: event-id }
-          (merge event-data { vip-sold: (+ (get vip-sold event-data) u1) })
+          (merge event-data { 
+            vip-sold: (+ (get vip-sold event-data) u1),
+            escrow-balance: (+ (get escrow-balance event-data) payment)
+          })
         )
       )
     )
@@ -236,16 +263,100 @@
   )
 )
 
-;; Cancel an event (organizer only)
+;; Cancel an event (organizer only) - enables refunds
 (define-public (cancel-event (event-id uint))
   (let ((event-data (unwrap! (map-get? events { event-id: event-id }) err-not-found)))
     (asserts! (> event-id u0) err-invalid-amount)
     (asserts! (is-eq tx-sender (get organizer event-data)) err-unauthorized)
+    (asserts! (get is-active event-data) err-event-not-active)
+    (asserts! (not (get is-completed event-data)) err-event-already-completed)
     (map-set events
       { event-id: event-id }
-      (merge event-data { is-active: false })
+      (merge event-data { 
+        is-active: false,
+        is-cancelled: true
+      })
     )
     (ok true)
+  )
+)
+
+;; Claim refund for cancelled event
+(define-public (claim-refund (event-id uint))
+  (let (
+    (event-data (unwrap! (map-get? events { event-id: event-id }) err-not-found))
+    (booking-data (unwrap! (map-get? bookings { event-id: event-id, attendee: tx-sender }) err-not-found))
+  )
+    (asserts! (> event-id u0) err-invalid-amount)
+    (asserts! (get is-cancelled event-data) err-event-not-cancelled)
+    (asserts! (not (get refund-claimed booking-data)) err-refund-already-claimed)
+    
+    ;; Transfer refund from contract to user
+    (try! (as-contract (stx-transfer? (get amount-paid booking-data) tx-sender tx-sender)))
+    
+    ;; Mark refund as claimed
+    (map-set bookings
+      { event-id: event-id, attendee: tx-sender }
+      (merge booking-data { refund-claimed: true })
+    )
+    
+    ;; Update event escrow balance
+    (map-set events
+      { event-id: event-id }
+      (merge event-data { 
+        escrow-balance: (- (get escrow-balance event-data) (get amount-paid booking-data))
+      })
+    )
+    
+    (ok (get amount-paid booking-data))
+  )
+)
+
+;; Release escrow funds to organizer after successful event
+(define-public (release-event-funds (event-id uint))
+  (let ((event-data (unwrap! (map-get? events { event-id: event-id }) err-not-found)))
+    (asserts! (> event-id u0) err-invalid-amount)
+    (asserts! (is-eq tx-sender (get organizer event-data)) err-unauthorized)
+    (asserts! (not (get is-cancelled event-data)) err-event-not-active)
+    (asserts! (>= stacks-block-height (get event-date event-data)) err-event-not-active)
+    (asserts! (not (get is-completed event-data)) err-event-already-completed)
+    (asserts! (> (get escrow-balance event-data) u0) err-insufficient-contract-balance)
+    
+    ;; Calculate total revenue and platform fees
+    (let (
+      (total-escrow (get escrow-balance event-data))
+      (total-tickets (+ (+ (get early-bird-sold event-data) (get regular-sold event-data)) (get vip-sold event-data)))
+      (ticket-revenue (- total-escrow 
+        (+ 
+          (* (get early-bird-sold event-data) (calculate-platform-fee (get early-bird-price event-data)))
+          (+ 
+            (* (get regular-sold event-data) (calculate-platform-fee (get regular-price event-data)))
+            (* (get vip-sold event-data) (calculate-platform-fee (get vip-price event-data)))
+          )
+        )
+      ))
+      (platform-fees (- total-escrow ticket-revenue))
+    )
+      ;; Transfer ticket revenue to organizer
+      (try! (as-contract (stx-transfer? ticket-revenue tx-sender (get organizer event-data))))
+      
+      ;; Transfer platform fees to contract owner
+      (try! (as-contract (stx-transfer? platform-fees tx-sender contract-owner)))
+      
+      ;; Mark event as completed and clear escrow
+      (map-set events
+        { event-id: event-id }
+        (merge event-data { 
+          is-completed: true,
+          escrow-balance: u0
+        })
+      )
+      
+      (ok { 
+        organizer-payout: ticket-revenue,
+        platform-fees: platform-fees
+      })
+    )
   )
 )
 
@@ -299,9 +410,14 @@
     (asserts! (is-valid-ticket-type ticket-type) err-invalid-ticket-type)
     (ok (match (map-get? events { event-id: event-id })
       event-data 
-        (if (is-eq ticket-type ticket-type-early-bird)
-          (is-early-bird-available event-data)
-          (< (get-tickets-sold event-data ticket-type) (get-tier-capacity event-data ticket-type))
+        (and
+          (get is-active event-data)
+          (not (get is-cancelled event-data))
+          (not (get is-completed event-data))
+          (if (is-eq ticket-type ticket-type-early-bird)
+            (is-early-bird-available event-data)
+            (< (get-tickets-sold event-data ticket-type) (get-tier-capacity event-data ticket-type))
+          )
         )
       false
     ))
@@ -344,6 +460,58 @@
         regular-capacity: (get regular-capacity event-data),
         vip-capacity: (get vip-capacity event-data)
       })
+      none
+    ))
+  )
+)
+
+;; Get escrow balance for an event
+(define-read-only (get-escrow-balance (event-id uint))
+  (begin
+    (asserts! (> event-id u0) err-invalid-amount)
+    (ok (match (map-get? events { event-id: event-id })
+      event-data (some (get escrow-balance event-data))
+      none
+    ))
+  )
+)
+
+;; Check if user is eligible for refund
+(define-read-only (is-refund-eligible (event-id uint) (attendee principal))
+  (begin
+    (asserts! (> event-id u0) err-invalid-amount)
+    (ok (match (map-get? events { event-id: event-id })
+      event-data 
+        (match (map-get? bookings { event-id: event-id, attendee: attendee })
+          booking-data 
+            (and 
+              (get is-cancelled event-data)
+              (not (get refund-claimed booking-data))
+            )
+          false
+        )
+      false
+    ))
+  )
+)
+
+;; Get refund amount for a user's booking
+(define-read-only (get-refund-amount (event-id uint) (attendee principal))
+  (begin
+    (asserts! (> event-id u0) err-invalid-amount)
+    (ok (match (map-get? events { event-id: event-id })
+      event-data 
+        (if (get is-cancelled event-data)
+          (match (map-get? bookings { event-id: event-id, attendee: attendee })
+            booking-data 
+              (if (not (get refund-claimed booking-data))
+                (some (get amount-paid booking-data))
+                none
+              )
+            none
+          )
+          none
+        )
       none
     ))
   )
