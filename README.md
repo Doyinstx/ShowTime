@@ -1,10 +1,10 @@
 # ShowTime 🎭
 
-A decentralized entertainment booking platform built on Stacks blockchain using Clarity smart contracts with **multi-tier pricing** support and **automated refund system**.
+A decentralized entertainment booking platform built on Stacks blockchain using Clarity smart contracts with **multi-tier pricing** support, **automated refund system**, and **event rating & reviews**.
 
 ## Overview
 
-ShowTime enables event organizers to create entertainment events with flexible pricing tiers and allows users to book tickets in a trustless, decentralized manner. The platform handles ticket sales across multiple tiers (Early Bird, Regular, VIP), capacity management, booking confirmations, and automated refunds for cancelled events through smart contracts with STX escrow.
+ShowTime enables event organizers to create entertainment events with flexible pricing tiers and allows users to book tickets in a trustless, decentralized manner. The platform handles ticket sales across multiple tiers (Early Bird, Regular, VIP), capacity management, booking confirmations, automated refunds for cancelled events, and post-event ratings and reviews through smart contracts with STX escrow.
 
 ## Features
 
@@ -12,6 +12,8 @@ ShowTime enables event organizers to create entertainment events with flexible p
 - **Event Creation**: Organizers can create entertainment events with custom pricing and capacity for each tier
 - **Flexible Ticket Booking**: Users can securely book tickets from available tiers with automatic capacity management
 - **Automated Refund System**: STX escrow mechanism with automatic refunds for cancelled events
+- **Event Rating & Reviews**: Attendees can rate and review events after completion with verified attendance
+- **Review Aggregation**: Automatic calculation of average ratings and review counts
 - **Early Bird Sales**: Time-limited early bird tickets with special pricing
 - **VIP Experience**: Premium ticket tier with enhanced pricing
 - **Platform Fee System**: Configurable platform fees for sustainable operations
@@ -19,7 +21,7 @@ ShowTime enables event organizers to create entertainment events with flexible p
 - **Event Cancellation**: Organizers can cancel events with automatic refund processing
 - **Tier-specific Capacity Control**: Automatic prevention of overbooking per tier
 - **Escrow Protection**: All ticket payments held in escrow until event completion or cancellation
-- **Advanced Analytics**: Track sales performance across different ticket tiers
+- **Advanced Analytics**: Track sales performance and event ratings across different ticket tiers
 
 ## Ticket Tiers
 
@@ -29,6 +31,7 @@ ShowTime enables event organizers to create entertainment events with flexible p
 - **Capacity**: Limited quantity set by organizer
 - **Benefits**: Significant cost savings for early purchasers
 - **Refund**: Full refund if event cancelled
+- **Review Rights**: Can review after event completion
 
 ### 2. Regular Tickets
 - **Price**: Standard pricing
@@ -36,6 +39,7 @@ ShowTime enables event organizers to create entertainment events with flexible p
 - **Capacity**: Main ticket allocation
 - **Benefits**: Standard event access
 - **Refund**: Full refund if event cancelled
+- **Review Rights**: Can review after event completion
 
 ### 3. VIP Tickets
 - **Price**: Premium pricing
@@ -43,6 +47,32 @@ ShowTime enables event organizers to create entertainment events with flexible p
 - **Capacity**: Limited premium allocation
 - **Benefits**: Enhanced experience (implementation dependent)
 - **Refund**: Full refund if event cancelled
+- **Review Rights**: Can review after event completion
+
+## Rating & Review System
+
+The platform features a comprehensive rating and review system with verified attendance:
+
+### Rating Features
+- **5-Star Rating System**: Rate events from 1 to 5 stars
+- **Verified Attendees Only**: Only confirmed ticket holders can review
+- **Post-Event Reviews**: Reviews allowed only after event completion
+- **One Review Per User**: Each attendee can submit one review per event
+- **Automatic Aggregation**: Average ratings calculated automatically
+
+### Review Features
+- **Written Reviews**: Text-based feedback up to 500 characters
+- **Timestamp Tracking**: All reviews timestamped for transparency
+- **Immutable Records**: Reviews stored permanently on blockchain
+- **Review Discovery**: Query reviews by event or user
+- **Rating Statistics**: View average ratings and total review counts
+
+### Review Validation
+- Must be a confirmed ticket holder
+- Event must be completed (past event date)
+- Rating must be between 1-5 stars
+- Review text must be between 1-500 characters
+- One review per event per user
 
 ## Refund System
 
@@ -73,6 +103,7 @@ The platform features an automated STX escrow system that provides:
 - `cancel-event`: Cancel an event (organizer only) - triggers refund eligibility
 - `claim-refund`: Claim refund for cancelled event (attendees only)
 - `release-event-funds`: Release escrow funds to organizer after successful event
+- `submit-review`: Submit rating and review for completed event (verified attendees only)
 - `update-platform-fee`: Update platform fee (owner only)
 
 ### Read-Only Functions
@@ -89,6 +120,10 @@ The platform features an automated STX escrow system that provides:
 - `get-escrow-balance`: Get total STX held in escrow for an event
 - `is-refund-eligible`: Check if user is eligible for refund
 - `get-refund-amount`: Get refund amount for a user's booking
+- `get-review`: Get a specific user's review for an event
+- `get-event-rating`: Get average rating and total reviews for an event
+- `get-user-reviews`: Get all reviews submitted by a specific user
+- `can-review-event`: Check if user is eligible to review an event
 
 ## Usage
 
@@ -120,6 +155,28 @@ The platform features an automated STX escrow system that provides:
 
 ;; Book VIP ticket (type 3)
 (contract-call? .showtime book-ticket u1 u3 u1575000)
+```
+
+### Rating & Review System Usage
+
+```clarity
+;; Submit a review after attending event
+(contract-call? .showtime submit-review 
+  u1                                    ;; event-id
+  u5                                    ;; rating (1-5 stars)
+  "Amazing performance! Great venue!")  ;; review text
+
+;; Check if you can review an event
+(contract-call? .showtime can-review-event u1 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)
+
+;; Get event's average rating and review count
+(contract-call? .showtime get-event-rating u1)
+
+;; Get a specific user's review
+(contract-call? .showtime get-review u1 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)
+
+;; Get all reviews by a user
+(contract-call? .showtime get-user-reviews 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM)
 ```
 
 ### Refund System Usage
@@ -194,6 +251,10 @@ This ensures logical pricing progression across tiers.
 - `u113`: Event not cancelled
 - `u114`: Insufficient contract balance
 - `u115`: Event already completed
+- `u116`: Invalid rating value
+- `u117`: Review already submitted
+- `u118`: Event not completed yet
+- `u119`: Not a verified attendee
 
 ## Installation
 
@@ -218,6 +279,9 @@ Test scenarios should cover:
 - Event cancellation and refunds
 - Escrow fund management
 - Fund release after successful events
+- Rating and review submission
+- Review eligibility validation
+- Rating aggregation and statistics
 
 ## API Integration Examples
 
@@ -251,6 +315,34 @@ async function claimRefund(eventId: number) {
   });
   return result;
 }
+
+// Example review submission function
+async function submitReview(eventId: number, rating: number, reviewText: string) {
+  const result = await contractCall({
+    contractAddress: CONTRACT_ADDRESS,
+    contractName: 'showtime',
+    functionName: 'submit-review',
+    functionArgs: [
+      uintCV(eventId),
+      uintCV(rating),
+      stringAsciiCV(reviewText)
+    ],
+  });
+  return result;
+}
+
+// Example get event rating function
+async function getEventRating(eventId: number) {
+  const result = await contractCallReadOnly({
+    contractAddress: CONTRACT_ADDRESS,
+    contractName: 'showtime',
+    functionName: 'get-event-rating',
+    functionArgs: [
+      uintCV(eventId)
+    ],
+  });
+  return result;
+}
 ```
 
 ## Contributing
@@ -258,13 +350,13 @@ async function claimRefund(eventId: number) {
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Add tests for new refund functionality
+4. Add tests for new rating and review functionality
 5. Submit a pull request
 
 ## Roadmap
 
 - [x] **Refund System**: Add automated refund mechanism for cancelled events with STX escrow ✅
-- [ ] **Event Rating & Reviews**: Allow attendees to rate and review events after completion
+- [x] **Event Rating & Reviews**: Allow attendees to rate and review events after completion ✅
 - [ ] **Loyalty Program**: Implement reward points for frequent event attendees
 - [ ] **Group Booking Discounts**: Add functionality for bulk ticket purchases with automatic discounts
 - [ ] **Event Streaming Integration**: Connect with streaming platforms for hybrid physical/virtual events
@@ -275,4 +367,4 @@ async function claimRefund(eventId: number) {
 
 ---
 
-**Note**: This implementation provides a foundation for multi-tier ticketing with automated refunds. The escrow system ensures both organizers and attendees are protected, with automatic refund processing for cancelled events and secure fund release for successful events.
+**Note**: This implementation provides a foundation for multi-tier ticketing with automated refunds and event ratings. The escrow system ensures both organizers and attendees are protected, with automatic refund processing for cancelled events, secure fund release for successful events, and verified attendee reviews for community feedback.
