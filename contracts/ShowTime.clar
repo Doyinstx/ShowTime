@@ -1,5 +1,5 @@
 ;; ShowTime - Entertainment Booking Platform
-;; A decentralized platform for booking entertainment events with multi-tier pricing and automated refunds
+;; A decentralized platform for booking entertainment events with multi-tier pricing, automated refunds, and event reviews
 
 ;; Constants
 (define-constant contract-owner tx-sender)
@@ -19,11 +19,19 @@
 (define-constant err-event-not-cancelled (err u113))
 (define-constant err-insufficient-contract-balance (err u114))
 (define-constant err-event-already-completed (err u115))
+(define-constant err-invalid-rating (err u116))
+(define-constant err-review-already-submitted (err u117))
+(define-constant err-event-not-completed (err u118))
+(define-constant err-not-verified-attendee (err u119))
 
 ;; Ticket type constants
 (define-constant ticket-type-early-bird u1)
 (define-constant ticket-type-regular u2)
 (define-constant ticket-type-vip u3)
+
+;; Rating constants
+(define-constant min-rating u1)
+(define-constant max-rating u5)
 
 ;; Data Variables
 (define-data-var next-event-id uint u1)
@@ -51,7 +59,9 @@
     is-completed: bool,
     event-date: uint,
     early-bird-deadline: uint,
-    escrow-balance: uint
+    escrow-balance: uint,
+    total-reviews: uint,
+    total-rating-sum: uint
   }
 )
 
@@ -67,7 +77,21 @@
   }
 )
 
+(define-map reviews
+  { event-id: uint, reviewer: principal }
+  {
+    rating: uint,
+    review-text: (string-ascii 500),
+    review-timestamp: uint
+  }
+)
+
 (define-map user-booking-count
+  { user: principal }
+  { count: uint }
+)
+
+(define-map user-review-count
   { user: principal }
   { count: uint }
 )
@@ -81,9 +105,19 @@
   (and (> (len input) u0) (<= (len input) u500))
 )
 
+(define-private (validate-review-text (input (string-ascii 500)))
+  (and (> (len input) u0) (<= (len input) u500))
+)
+
 (define-private (increment-booking-count (user principal))
   (let ((current-count (default-to u0 (get count (map-get? user-booking-count { user: user })))))
     (map-set user-booking-count { user: user } { count: (+ current-count u1) })
+  )
+)
+
+(define-private (increment-review-count (user principal))
+  (let ((current-count (default-to u0 (get count (map-get? user-review-count { user: user })))))
+    (map-set user-review-count { user: user } { count: (+ current-count u1) })
   )
 )
 
@@ -97,7 +131,11 @@
           (is-eq ticket-type ticket-type-vip)))
 )
 
-(define-private (get-ticket-price (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (is-cancelled bool) (is-completed bool) (event-date uint) (early-bird-deadline uint) (escrow-balance uint))) (ticket-type uint))
+(define-private (is-valid-rating (rating uint))
+  (and (>= rating min-rating) (<= rating max-rating))
+)
+
+(define-private (get-ticket-price (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (is-cancelled bool) (is-completed bool) (event-date uint) (early-bird-deadline uint) (escrow-balance uint) (total-reviews uint) (total-rating-sum uint))) (ticket-type uint))
   (if (is-eq ticket-type ticket-type-early-bird)
     (get early-bird-price event-data)
     (if (is-eq ticket-type ticket-type-regular)
@@ -105,7 +143,7 @@
       (get vip-price event-data)))
 )
 
-(define-private (get-tickets-sold (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (is-cancelled bool) (is-completed bool) (event-date uint) (early-bird-deadline uint) (escrow-balance uint))) (ticket-type uint))
+(define-private (get-tickets-sold (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (is-cancelled bool) (is-completed bool) (event-date uint) (early-bird-deadline uint) (escrow-balance uint) (total-reviews uint) (total-rating-sum uint))) (ticket-type uint))
   (if (is-eq ticket-type ticket-type-early-bird)
     (get early-bird-sold event-data)
     (if (is-eq ticket-type ticket-type-regular)
@@ -113,7 +151,7 @@
       (get vip-sold event-data)))
 )
 
-(define-private (get-tier-capacity (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (is-cancelled bool) (is-completed bool) (event-date uint) (early-bird-deadline uint) (escrow-balance uint))) (ticket-type uint))
+(define-private (get-tier-capacity (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (is-cancelled bool) (is-completed bool) (event-date uint) (early-bird-deadline uint) (escrow-balance uint) (total-reviews uint) (total-rating-sum uint))) (ticket-type uint))
   (if (is-eq ticket-type ticket-type-early-bird)
     (get early-bird-capacity event-data)
     (if (is-eq ticket-type ticket-type-regular)
@@ -121,7 +159,7 @@
       (get vip-capacity event-data)))
 )
 
-(define-private (is-early-bird-available (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (is-cancelled bool) (is-completed bool) (event-date uint) (early-bird-deadline uint) (escrow-balance uint))))
+(define-private (is-early-bird-available (event-data (tuple (organizer principal) (title (string-ascii 100)) (description (string-ascii 500)) (venue (string-ascii 100)) (early-bird-price uint) (regular-price uint) (vip-price uint) (early-bird-capacity uint) (regular-capacity uint) (vip-capacity uint) (early-bird-sold uint) (regular-sold uint) (vip-sold uint) (is-active bool) (is-cancelled bool) (is-completed bool) (event-date uint) (early-bird-deadline uint) (escrow-balance uint) (total-reviews uint) (total-rating-sum uint))))
   (and (< (get early-bird-sold event-data) (get early-bird-capacity event-data))
        (<= stacks-block-height (get early-bird-deadline event-data)))
 )
@@ -178,7 +216,9 @@
         is-completed: false,
         event-date: event-date,
         early-bird-deadline: early-bird-deadline,
-        escrow-balance: u0
+        escrow-balance: u0,
+        total-reviews: u0,
+        total-rating-sum: u0
       }
     )
     (var-set next-event-id (+ event-id u1))
@@ -360,6 +400,47 @@
   )
 )
 
+;; Submit a review and rating for a completed event (verified attendees only)
+(define-public (submit-review (event-id uint) (rating uint) (review-text (string-ascii 500)))
+  (let (
+    (event-data (unwrap! (map-get? events { event-id: event-id }) err-not-found))
+    (booking-data (unwrap! (map-get? bookings { event-id: event-id, attendee: tx-sender }) err-not-found))
+    (existing-review (map-get? reviews { event-id: event-id, reviewer: tx-sender }))
+  )
+    (asserts! (> event-id u0) err-invalid-amount)
+    (asserts! (is-valid-rating rating) err-invalid-rating)
+    (asserts! (validate-review-text review-text) err-invalid-string)
+    (asserts! (get is-confirmed booking-data) err-not-verified-attendee)
+    (asserts! (>= stacks-block-height (get event-date event-data)) err-event-not-completed)
+    (asserts! (not (get is-cancelled event-data)) err-event-not-active)
+    (asserts! (is-none existing-review) err-review-already-submitted)
+    
+    ;; Create review
+    (map-set reviews
+      { event-id: event-id, reviewer: tx-sender }
+      {
+        rating: rating,
+        review-text: review-text,
+        review-timestamp: stacks-block-height
+      }
+    )
+    
+    ;; Update event rating statistics
+    (map-set events
+      { event-id: event-id }
+      (merge event-data {
+        total-reviews: (+ (get total-reviews event-data) u1),
+        total-rating-sum: (+ (get total-rating-sum event-data) rating)
+      })
+    )
+    
+    ;; Update user review count
+    (increment-review-count tx-sender)
+    
+    (ok true)
+  )
+)
+
 ;; Update platform fee (contract owner only)
 (define-public (update-platform-fee (new-fee uint))
   (begin
@@ -513,6 +594,60 @@
           none
         )
       none
+    ))
+  )
+)
+
+;; Get a specific user's review for an event
+(define-read-only (get-review (event-id uint) (reviewer principal))
+  (begin
+    (asserts! (> event-id u0) err-invalid-amount)
+    (ok (map-get? reviews { event-id: event-id, reviewer: reviewer }))
+  )
+)
+
+;; Get event rating statistics (average rating and total reviews)
+(define-read-only (get-event-rating (event-id uint))
+  (begin
+    (asserts! (> event-id u0) err-invalid-amount)
+    (ok (match (map-get? events { event-id: event-id })
+      event-data 
+        (let (
+          (total-reviews (get total-reviews event-data))
+          (total-rating-sum (get total-rating-sum event-data))
+        )
+          (some {
+            average-rating: (if (> total-reviews u0) (/ total-rating-sum total-reviews) u0),
+            total-reviews: total-reviews
+          })
+        )
+      none
+    ))
+  )
+)
+
+;; Get total number of reviews submitted by a user
+(define-read-only (get-user-review-count (user principal))
+  (default-to u0 (get count (map-get? user-review-count { user: user })))
+)
+
+;; Check if user can review an event (verified attendee and event completed)
+(define-read-only (can-review-event (event-id uint) (attendee principal))
+  (begin
+    (asserts! (> event-id u0) err-invalid-amount)
+    (ok (match (map-get? events { event-id: event-id })
+      event-data 
+        (match (map-get? bookings { event-id: event-id, attendee: attendee })
+          booking-data 
+            (and
+              (get is-confirmed booking-data)
+              (>= stacks-block-height (get event-date event-data))
+              (not (get is-cancelled event-data))
+              (is-none (map-get? reviews { event-id: event-id, reviewer: attendee }))
+            )
+          false
+        )
+      false
     ))
   )
 )
